@@ -120,18 +120,19 @@ Searched X/Twitter via Grok for discussions and public platform releases. Key fi
 
 ### Recommended Download List
 
-| Priority | Dataset | Size | Violation Category | Status |
-|----------|---------|------|--------------------|--------|
-| P0 | BD3 | 3,965 | #3 Peeling Paint | In plan |
-| P0 | TACO | 1,500 | #2 Garbage | In plan |
-| P0 | Aerial Dumping | 1,555 | #2 Garbage | In plan |
-| P0 | Grass-Weeds | 2,486 | #1 Overgrown | In plan |
-| **P1** | **Broken Fence Detection** | **~2,200** | **#4 Damaged Structures** | **New** |
-| **P1** | **Garbage Object Detection** | **10,464** | **#2 Garbage (reinforcement)** | **New** |
-| **P1** | **Building Surface Defect Detection** | **7,354** | **#3 Paint (reinforcement)** | **New** |
-| P2 | Damaged Constructions | ~500 | #4 Damaged Structures (supplement) | New |
-| P2 | SVHN (full-format) | 630K+ | #5 Missing Numbers (constructed) | New |
-| P3 | SDNET2018 | 56,000 | Pretraining / data mixing | Optional |
+| Priority | Dataset | Images | Disk Size | Violation Category | Status |
+|----------|---------|--------|-----------|-------------------|--------|
+| P0 | BD3 | 3,965 | 108 MB | #3 Peeling Paint | Downloaded |
+| P0 | TACO | 1,500 | 2.6 GB | #2 Garbage | Downloaded |
+| P0 | Aerial Dumping | 1,555 | 291 MB | #2 Garbage | Downloaded |
+| P0 | Grass-Weeds | 2,486 | 115 MB | #1 Overgrown | Downloaded |
+| P1 | Broken Fence Detection | 1,297 | 99 MB | #4 Damaged Structures | Downloaded |
+| P1 | Garbage Object Detection | 10,464 | 409 MB | #2 Garbage (reinforcement) | Downloaded |
+| P1 | Building Surface Defect | 7,353 | 865 MB | #3 Paint (reinforcement) | Downloaded |
+| P2 | Damaged Constructions | ~500 | ~84 MB | #4 Damaged Structures (supplement) | Not downloaded |
+| P2 | SVHN (full-format) | 630K+ | ~600 MB | #5 Missing Numbers (constructed) | Not downloaded |
+| P3 | SDNET2018 | 56,000 | ~2 GB | Pretraining / data mixing | Not downloaded |
+| | **Total (downloaded)** | **28,620** | **4.3 GB** | | |
 
 ### Unified Label Mapping (Updated)
 
@@ -155,7 +156,15 @@ SVHN positive/negative           → address_number_present / address_number_mis
 
 | | Original Plan | After Supplement |
 |--|--------------|-----------------|
-| Number of datasets | 4 | 9 |
-| Total images | ~9,500 | ~30,000+ (excluding SVHN/SDNET) |
-| Violation types covered | 3/5 | 5/5 |
-| Largest remaining gap | Damaged Structures, Missing Numbers | Vehicle on Unimproved Surface (deferred to real data) |
+| Number of datasets | 4 | 7 (downloaded) + 2 optional |
+| Total images | ~9,500 | 28,620 (4.3 GB) |
+| Violation types covered | 3/5 | 4/5 |
+| Largest remaining gap | Damaged Structures, Missing Numbers | Missing Address Numbers + Vehicle on Unimproved Surface (deferred to real data) |
+
+### Class Imbalance Warning
+
+After merging, `trash_debris` dominates at 11,964 images (41.8%) while `structural_damage` has only 1,204 (4.2%) — a **9.9:1 imbalance ratio**. This was only 2.1:1 before adding Garbage Object Detection.
+
+**Mitigation plan**: Downsample `trash_debris` to ~3,000 images before training (random sample from TACO + Garbage Object Detection), bringing the ratio down to ~2.5:1. Additionally use weighted cross-entropy loss during training.
+
+See `data-cleaning-report.md` for the full audit results.

@@ -59,8 +59,12 @@ def collect_all_images() -> list[dict]:
             if p.exists():
                 rows.append({"path": p, "label": "trash_debris", "source": "TACO", "orig_class": "trash"})
 
-    # Roboflow datasets
-    for dataset_dir, label in [("grass-weeds", "overgrown_vegetation"), ("aerial-dumping", "illegal_dumping")]:
+    # Roboflow datasets (original + broken-fence)
+    for dataset_dir, label in [
+        ("grass-weeds", "overgrown_vegetation"),
+        ("aerial-dumping", "illegal_dumping"),
+        ("broken-fence", "damaged_structures"),
+    ]:
         base = ROOT / dataset_dir
         if not base.exists():
             continue
@@ -71,6 +75,28 @@ def collect_all_images() -> list[dict]:
             for f in sorted(d.iterdir()):
                 if f.suffix.lower() in (".jpg", ".jpeg", ".png"):
                     rows.append({"path": f, "label": label, "source": dataset_dir, "orig_class": label})
+
+    # Garbage Object Detection (HuggingFace, extracted zips)
+    garbage_base = ROOT / "garbage-object-detection"
+    if garbage_base.exists():
+        for split_dir in ("train", "valid", "test"):
+            d = garbage_base / split_dir
+            if not d.exists():
+                continue
+            for f in sorted(d.iterdir()):
+                if f.suffix.lower() in (".jpg", ".jpeg", ".png"):
+                    rows.append({"path": f, "label": "trash_debris", "source": "garbage-object-detection", "orig_class": "garbage"})
+
+    # Building Surface Defect Detection (HuggingFace, YOLO format)
+    bsd_base = ROOT / "building-surface-defect" / "images"
+    if bsd_base.exists():
+        for split_dir in ("train", "val", "test"):
+            d = bsd_base / split_dir
+            if not d.exists():
+                continue
+            for f in sorted(d.iterdir()):
+                if f.suffix.lower() in (".jpg", ".jpeg", ".png"):
+                    rows.append({"path": f, "label": "exterior_deterioration", "source": "building-surface-defect", "orig_class": "building_defect"})
 
     return rows
 

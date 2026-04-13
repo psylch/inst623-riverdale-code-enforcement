@@ -47,11 +47,17 @@ def print_metrics(
     y_pred: np.ndarray,
     y_probs: np.ndarray,
     model_name: str = "Model",
+    classes: list[str] | None = None,
 ) -> dict:
-    """Print formatted metrics and return them as a dict."""
+    """Print formatted metrics and return them as a dict.
+
+    When `classes` is None, falls back to the proxy taxonomy (`data.CLASSES`).
+    Pass a custom list for client/zero-shot evaluations on a different label space.
+    """
+    cls = list(classes) if classes is not None else CLASSES
     acc = accuracy_score(y_true, y_pred)
     macro_f1 = f1_score(y_true, y_pred, average="macro")
-    top3_acc = top_k_accuracy_score(y_true, y_probs, k=3, labels=range(len(CLASSES)))
+    top3_acc = top_k_accuracy_score(y_true, y_probs, k=3, labels=range(len(cls)))
 
     print("=" * 55)
     print(f"{model_name.upper()} — TEST SET RESULTS")
@@ -60,7 +66,14 @@ def print_metrics(
     print(f"  Top-3 Accuracy:  {top3_acc:.4f}")
     print(f"  Macro F1:        {macro_f1:.4f}")
     print()
-    print(classification_report(y_true, y_pred, target_names=CLASSES, digits=3))
+    present = sorted(set(y_true.tolist()) | set(y_pred.tolist()))
+    print(classification_report(
+        y_true, y_pred,
+        labels=present,
+        target_names=[cls[i] for i in present],
+        digits=3,
+        zero_division=0,
+    ))
 
     return {
         "model": model_name,
@@ -75,13 +88,16 @@ def plot_confusion_matrix(
     y_pred: np.ndarray,
     title: str = "Confusion Matrix",
     ax: plt.Axes | None = None,
+    classes: list[str] | None = None,
 ) -> plt.Axes:
     """Plot a confusion matrix heatmap."""
-    cm = confusion_matrix(y_true, y_pred)
-    short_names = [c.replace("_", "\n") for c in CLASSES]
+    cls = list(classes) if classes is not None else CLASSES
+    cm = confusion_matrix(y_true, y_pred, labels=range(len(cls)))
+    short_names = [c.replace("_", "\n") for c in cls]
 
     if ax is None:
-        _, ax = plt.subplots(figsize=(7, 6))
+        figsize = (max(6, len(cls) * 0.7), max(5, len(cls) * 0.6))
+        _, ax = plt.subplots(figsize=figsize)
 
     sns.heatmap(
         cm,
