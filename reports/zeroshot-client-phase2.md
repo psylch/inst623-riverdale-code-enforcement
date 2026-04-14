@@ -2,7 +2,6 @@
 
 > INST623 AI Adoption Clinic — Final Project
 > Chihao Li（Technical Lead）· 2026-04-13
-> 承接文档：`reports/zeroshot-client-evaluation.md`（Phase 1）
 
 ---
 
@@ -16,7 +15,7 @@
 
 ## 我们之前做到哪了
 
-上周的工作（详见 `reports/zeroshot-client-evaluation.md`）用 CLIP ViT-B/32 和刚开源的 Gemma 4 E4B-IT 两个零样本模型跑了客户数据。CLIP 走的是 softmax + argmax + top-3 的 classification 路线；Gemma 4 被 prompt 成 "returns a ranked top-3 JSON" 的 ranked classifier。两个模型在 multi-label 真值下分别是：
+上周我们用 CLIP ViT-B/32（LAION-2B）和刚开源的 Gemma 4 E4B-IT（4-bit 量化，通过 mlx-vlm 在 M4 Mac 上本地跑）两个零样本模型跑了客户数据。CLIP 走的是 softmax + argmax + top-3 的 classification 路线；Gemma 4 被 prompt 成 "returns a ranked top-3 JSON" 的 ranked classifier。两个模型在 multi-label 真值下分别是：
 
 | 模型 | Top-1 | Top-3 |
 |------|:---:|:---:|
@@ -57,7 +56,7 @@ Phase 2 的目标就是把这三个猜想跑成数字。
 
 **第三件，Cascade 拼装。** 把 CLIP 的 raw similarity 和 Gemma 的 binary scores 合并 —— 对每张图，CLIP 出 top-k 候选，Gemma 对这 k 个独立回答 yes/no，阈值以上的进最终输出。评估不同 k（3、5、9）和不同 threshold 下的 Jaccard / sample-F1，和两个单模型 baseline 做对比。
 
-全部代码在 `src/binary_prompt.py`、`scripts/run_clip_separability.py`、`scripts/run_gemma_binary.py`、`scripts/analyze_binary_results.py`。
+三件事没有引入任何训练、微调、或新数据，用的全是客户手头那 98 张照片和两个现成的 foundation model checkpoint。
 
 ---
 
@@ -79,6 +78,10 @@ k=5 是默认推荐 —— 99% 召回，只比 k=9 全跑漏 1 张，Gemma 推�
 但 per-class 拆开看，有一个非常具体的坏消息：**`damaged_roof_shingles` 从 top-3 到 top-5 再到 top-7 都是 40% 召回**，也就是 10 张真实 roof_shingles 正例里有 6 张 CLIP 完全没把这类排进前 5 名。其余 8 类在 top-5 都是 100%。roof_shingles 是**唯一一个系统性、可复现的 Stage 1 漏洞**。
 
 为什么整体 hit-any@top-5 还是 99%？因为那 6 张漏掉的图本身是多违规的，它们的 multi-label 里还有别的类（peeling_paint、junk_trash）被 CLIP 捞回了 top-5。**整体 hit-any 看不出 per-class 的漏洞，per-class 看得一清二楚**。
+
+下图是 CLIP 对 9 个类的 per-class 分数分布（每张图对某类的 raw cosine similarity），橙色是正例、灰色是其他类的 LOO 负例，AUC 标在每个子图上。7/9 类的分数分布有明显分离，damaged_roof_shingles 和 overgrown_vegetation 明显重叠严重：
+
+![CLIP per-class score separability](figures/clip_separability.png)
 
 ### Gemma 4 binary：per-class recall / precision
 
@@ -120,6 +123,10 @@ k=5 是默认推荐 —— 99% 召回，只比 k=9 全跑漏 1 张，Gemma 推�
 | peeling_paint | **0.903** | 0.796 | CLIP 胜 |
 
 **Gemma 救 CLIP 的地方**，恰好是 CLIP 在 Phase 1 里跪得最惨的两类（overgrown、roof）。**CLIP 救 Gemma 的地方**，恰好是三个立面窗户类（broken / boarded / peeling）—— 这些类视觉上很明确但 Gemma 在 9 选 1 时会 over-specify。两个模型的短板几乎不重叠，这是 cascade 能奏效的前提条件。
+
+下图是两个模型的 per-class AUC 并排柱状图。互补形状非常清晰：
+
+![CLIP vs Gemma binary per-class AUC](figures/auc_clip_vs_gemma_binary.png)
 
 ### Cascade：两个模型拼起来
 
@@ -196,7 +203,7 @@ CLIP 便宜 Gemma 贵只是副产品。真正让 cascade 好用的是：CLIP 和
 
 1. **重写 `damaged_roof_shingles` 的 CLIP prompt**。当前三条 prompt 偏描述不偏视觉，换成更具体的（比如 "asphalt shingles in patches showing wood sheathing underneath"）试试能不能把排名拉进 top-5。这是 10 分钟实验，Cascade 最大的 systematic bottleneck 就在这里。
 2. **收紧 `peeling_paint` 的 binary prompt**。加 "substantial"、"noticeable area" 这种限定词，看能不能把 FPR 从 54% 降下来而不伤 recall。如果降不下来，说明真的是 ground truth 问题，就要走数据路线解决。
-3. **把 cascade 收敛成 `src/cascade.py` 单模块**。现在分散在三个脚本里，工程上应该有一个 `CascadePipeline` 类可以被 CLI 或 notebook 直接调用，给 Ryan 做 demo 时用。
+3. **把 cascade 收敛成单个可复用模块**。现在 CLIP / Gemma binary / cascade 拼装分散在三个脚本里，工程上应该有一个 `CascadePipeline` 类可以被 CLI 或 notebook 直接调用，给 Ryan 做 demo 时用。
 4. **Few-shot 实验**。在 Gemma binary prompt 里加 2-3 张 reference 图，这个会部分消耗 "zero-shot" 的宣传价值，但能验证 Gemma 的上限在哪里。
 
 **依赖客户数据的事**：
@@ -212,30 +219,37 @@ CLIP 便宜 Gemma 贵只是副产品。真正让 cascade 好用的是：CLIP 和
 
 **最终交付**：
 
-Phase 1 和 Phase 2 两份 report 合起来是团队 final report 里 "Section 4.5 Zero-Shot Evaluation on Client Data" 的完整素材。Phase 1 讲"我们最初的任务定义是错的，是怎么被数据修正的"；Phase 2 讲"修正后的正确架构是什么、数字验证了什么"。两份合起来是一个完整的 "我们从 multi-class ranked 走到 per-class cascade，一路上每一步决策的依据" 叙事，给 Ryan 和评委看都合适。
+本报告会合并进团队 final report 的 "Section 4.5 Zero-Shot Evaluation on Client Data"。两条叙事主线是：(1) 我们最初的任务定义是错的，是怎么被数据修正的；(2) 修正后的正确架构是什么、数字验证了什么。这是从 multi-class ranked 走到 per-class cascade 一路上每一步决策的依据，给 Ryan 和评委看都合适。
 
 ---
 
 ## 可复现命令
 
+代码全部在公共仓库 `https://github.com/psylch/inst623-riverdale-code-enforcement`，本报告涉及的所有实验都可以从干净机器一键复现：
+
 ```bash
-# 1. CLIP per-class separability + top-k 分析（2 分钟）
-uv run python FinalProject/scripts/run_clip_separability.py
+# 克隆仓库并进入根目录
+git clone https://github.com/psylch/inst623-riverdale-code-enforcement.git
+cd inst623-riverdale-code-enforcement
 
-# 2. Gemma binary verification（~47 分钟，支持 resume）
-uv run python FinalProject/scripts/run_gemma_binary.py
-# 另一个终端监控进度：
-tail -f FinalProject/checkpoints/client_gemma4_binary_stream.jsonl
-# 中断后继续跑：直接再次运行同一命令
+# 安装 Python 依赖（uv，Python 3.12）
+uv sync
 
-# 3. 汇总分析 + 图表
-uv run python FinalProject/scripts/analyze_binary_results.py
+# 把客户照片放到 data/client-data/ 下
+# （每个违规 code 一个子目录，匹配 Riverdale Park 官方 taxonomy 的文件夹名）
+# 客户原始数据出于隐私原因不放进本仓库
+
+# 1. CLIP per-class separability + top-k 分析（约 2 分钟）
+uv run python scripts/run_clip_separability.py
+
+# 2. Gemma binary verification（约 47 分钟，支持 resume）
+uv run python scripts/run_gemma_binary.py
+# 另一个终端实时看进度：
+tail -f checkpoints/client_gemma4_binary_stream.jsonl
+# 中断后继续跑：直接再次运行同一命令，resume 逻辑自动跳过已完成的 pair
+
+# 3. 汇总分析 + 画图
+uv run python scripts/analyze_binary_results.py
 ```
 
-主要产物：
-
-- `checkpoints/client_clip_similarity.npz` — raw CLIP cosine similarity 矩阵
-- `checkpoints/client_gemma4_binary.npz` — Gemma binary scores / answers
-- `checkpoints/client_gemma4_binary_stream.jsonl` — 每 call 一行的审计日志
-- `reports/figures/clip_separability.png` — CLIP 分类分布直方图
-- `reports/figures/auc_clip_vs_gemma_binary.png` — 两模型 per-class AUC 对比
+以上所有路径都是相对于仓库根目录。实验产物（预测矩阵、相似度矩阵、审计日志、图表）落在 `checkpoints/` 和 `reports/figures/` 下。整个 pipeline 在 Apple Silicon 24 GB Mac 上端到端可跑 —— 模型权重首次运行从 Hugging Face 下载并缓存在本地，不依赖任何外部算力。

@@ -3,8 +3,6 @@
 > INST623 AI Adoption Clinic — Final Project
 > 实验人：Chihao Li（Technical Lead）
 > 实验日期：2026-04-12
-> 配套 notebook：`notebooks/experiment_client_zeroshot.ipynb`
-> 配套脚本：`scripts/run_gemma_client.py`
 
 ---
 
@@ -51,7 +49,7 @@
 | deteriorating_chimney | 3 |
 | **合计** | **98** |
 
-其余 5 类（porch / fence / address_numbers / siding / overgrown_trees）本批数据为空，评估中跳过。taxonomy、prompt、description 的完整定义都在 `src/client_data.py`。
+其余 5 类（porch / fence / address_numbers / siding / overgrown_trees）本批数据为空，评估中跳过。
 
 ### 2.2 模型
 
@@ -86,7 +84,7 @@
 
 `jupyter nbconvert --execute` 会把整个 cell 的 stdout 憋到 cell 结束才打印，Gemma 跑 98 张图的过程中我完全看不到进度。这既不方便监控，也让失败诊断变得很痛苦。
 
-**解法**：把 Gemma 推理从 notebook 里抽出来做成独立 Python 脚本 `scripts/run_gemma_client.py`，每张图的结果立刻 append 到 `checkpoints/client_gemma4_stream.jsonl` 并 flush。这样另一个终端 `tail -f` 就能实时看进度，跑完之后 notebook 只是读 cache。
+**解法**：把 Gemma 推理从 notebook 里抽出来做成独立 Python 脚本，每张图的结果立刻 append 到一个 JSONL 流式日志并 flush。这样另一个终端 `tail -f` 就能实时看进度，跑完之后 notebook 只是读 cache。
 
 **坑 3：parser 有一个隐蔽 bug（见下面 §5 错误归因）**
 
@@ -350,7 +348,7 @@ junk_trash_accumulation      0.857     0.923     0.889        13
 
 ### 9.1 立刻可做（不 block 客户，1-2 小时内）
 
-1. **改 CLIP 缓存为 raw cosine similarity**。现在 `client_clip_preds.npz` 存的是 softmax probs，信息被 T=100 的温度压扁了。改一行代码重新缓存 98×9 的 cosine similarity 原始矩阵。之后所有"per-class threshold / recall 曲线 / 分数分布分析"都直接复用这个矩阵，不用重跑 CLIP。
+1. **改 CLIP 的消费方式为 raw cosine similarity**。现在 CLIP 的输出走 softmax + argmax，信息被 T=100 的温度压扁了。应该直接用 98×9 的 raw cosine similarity 矩阵，之后所有"per-class threshold / recall 曲线 / 分数分布分析"都直接复用这个矩阵。
 2. **Per-class score separability 分析**。对 CLIP 的 98×9 raw similarity 矩阵，对每类画两个直方图 —— 这类正样本的 self-score vs 其他类正样本的 self-score。重叠多说明 CLIP 分不开这类，重叠少说明至少在"不同 violation 之间"能分。这是对"CLIP 够不够用"的第一次实证回答。
 3. **CLIP image embedding 的 t-SNE / UMAP 可视化**。98 张图的 image feature 降到 2D，用真实 label 上色，看 9 类在 embedding 空间里到底分不分得开 —— 直接回答 "CLIP zero-shot 有没有天花板" 这个问题。
 
@@ -388,9 +386,9 @@ junk_trash_accumulation      0.857     0.923     0.889        13
 
 | 阶段 | 产出 | 时间 |
 |------|------|------|
-| 本 notebook + 本 report | 已完成，进最终 report 的 "Section 4.5 Zero-Shot Evaluation on Real Client Data" | ✅ |
-| Binary verification 实验 | 新增 notebook + report 补章节 "Section 4.6 Per-Class Binary Framework" | 1 天内 |
-| Cascade pipeline 原型 | CLI 脚本 + 简单 web demo，接受图 → 返回候选 code + 理由 | 1 周内 |
+| 本次实验 | 客户数据零样本评估，进团队 final report 的 Zero-Shot Evaluation 章节 | ✅ 已完成 |
+| Binary verification 实验 | Per-class 二元判别路线的实证验证 | 1 天内 |
+| Cascade pipeline 原型 | CLI 脚本 + 简单 demo，接受图 → 返回候选 code + 理由 | 1 周内 |
 | Ryan 会议素材 | 包含 binary framing 论证 + 负样本 data ask + cascade demo | 下次客户会议 |
 
 ---
@@ -405,23 +403,7 @@ junk_trash_accumulation      0.857     0.923     0.889        13
 
 ---
 
-## 附录 A：文件清单
-
-| 文件 | 作用 |
-|------|------|
-| `src/client_data.py` | 客户 14 类 taxonomy、CLIP prompts、Gemma descriptions、catalogue builder |
-| `src/zeroshot.py` | CLIP / Gemma 通用零样本推理 + 流式日志支持 |
-| `src/evaluate.py` | 已扩展支持任意 class list（不再 hardcode proxy 5 类） |
-| `src/gen_client_notebook.py` | notebook 生成器 |
-| `scripts/run_gemma_client.py` | 独立 Gemma 推理脚本，带 JSONL 流式监控 |
-| `notebooks/experiment_client_zeroshot.ipynb` | 本次实验主 notebook |
-| `checkpoints/client_clip_preds.npz` | CLIP 预测结果 cache（softmax probs，后续改成 raw similarity） |
-| `checkpoints/client_gemma4_preds.npz` | Gemma 预测结果 cache（parser 已修） |
-| `checkpoints/client_gemma4_stream.jsonl` | Gemma 每图流式审计日志 |
-| `checkpoints/client_gemma4_raw.txt` | Gemma 完整原始输出 |
-| `reports/zeroshot-client-evaluation.md` | 本 report |
-
-## 附录 B：关键数字速查
+## 附录：关键数字速查
 
 | 指标 | CLIP ViT-B/32 | Gemma 4 E4B-IT |
 |------|:---:|:---:|
@@ -436,28 +418,42 @@ junk_trash_accumulation      0.857     0.923     0.889        13
 
 真正的 Gemma "看错" 数量：**1 / 98**（其余 30 个原始错判分解为 6 parser bug + 11 multi-label + 11 ranking error + 2 客户标注歧义/上下文不足）。
 
-## 附录 C：可复现命令
+---
+
+## 可复现命令
+
+代码全部在公共仓库 `https://github.com/psylch/inst623-riverdale-code-enforcement`，本报告涉及的实验都可以从干净机器一键复现：
 
 ```bash
-# 1. 生成 notebook
-uv run python FinalProject/src/gen_client_notebook.py
+# 克隆仓库并进入根目录
+git clone https://github.com/psylch/inst623-riverdale-code-enforcement.git
+cd inst623-riverdale-code-enforcement
 
-# 2. 独立跑 Gemma 推理（流式日志，可 tail 监控）
-uv run python FinalProject/scripts/run_gemma_client.py
-# 另一个终端：tail -f FinalProject/checkpoints/client_gemma4_stream.jsonl
+# 安装 Python 依赖（uv，Python 3.12）
+uv sync
 
-# 3. 执行完整 notebook（CLIP + Gemma 都走 cache，<30 s）
+# 把客户照片放到 data/client-data/ 下
+# （每个违规 code 一个子目录，匹配 Riverdale Park 官方 taxonomy 的文件夹名）
+# 客户原始数据出于隐私原因不放进本仓库
+
+# 生成并执行本次实验主 notebook（会用到 scripts/run_gemma_client.py 的流式日志）
+uv run python src/gen_client_notebook.py
+uv run python scripts/run_gemma_client.py
+# 另一个终端实时看进度：
+tail -f checkpoints/client_gemma4_stream.jsonl
+
+# 执行 notebook（CLIP + Gemma 都走 cache，<30 秒）
 uv run python -m nbconvert --to notebook --execute \
-    FinalProject/notebooks/experiment_client_zeroshot.ipynb \
+    notebooks/experiment_client_zeroshot.ipynb \
     --output experiment_client_zeroshot.ipynb \
     --ExecutePreprocessor.timeout=300
 
-# 4. 跨文件夹重复检测（发现 multi-label 数据结构）
+# 跨文件夹重复检测（发现 multi-label 数据结构的脚本）
 uv run python -c "
 import hashlib
 from pathlib import Path
 from collections import defaultdict
-root = Path('FinalProject/data/client-data')
+root = Path('data/client-data')
 h = defaultdict(list)
 for f in root.rglob('*.jpg'):
     h[hashlib.md5(f.read_bytes()).hexdigest()].append(f.parent.name.strip())
@@ -466,3 +462,5 @@ for hh, cats in h.items():
         print(hh[:8], '→', cats)
 "
 ```
+
+以上所有路径都是相对于仓库根目录。整个 pipeline 在 Apple Silicon 24 GB Mac 上端到端可跑 —— 模型权重首次运行从 Hugging Face 下载并缓存在本地，不依赖任何外部算力。

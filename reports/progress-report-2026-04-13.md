@@ -102,7 +102,13 @@ Two patterns stand out. First, **recall is broadly high** — 5 of 9 classes rea
 | peeling_paint | **0.903** | 0.796 | CLIP (+10.7) |
 | chimney, graffiti, vehicle, junk_trash | ~same | ~same | tied |
 
-Gemma rescues CLIP on exactly the two classes CLIP struggled with in Phase 1. CLIP rescues Gemma on the three facade/window classes where Gemma's over-specificity hurts. The two models' error distributions are almost entirely disjoint.
+Gemma rescues CLIP on exactly the two classes CLIP struggled with in Phase 1. CLIP rescues Gemma on the three facade/window classes where Gemma's over-specificity hurts. The two models' error distributions are almost entirely disjoint, as shown in the side-by-side AUC comparison below:
+
+![Per-class AUC: CLIP vs Gemma 4 binary](figures/auc_clip_vs_gemma_binary.png)
+
+The underlying CLIP per-class score distributions (orange = positives, gray = leave-one-out negatives from other violation classes) make the separability pattern visible:
+
+![CLIP per-class score separability](figures/clip_separability.png)
 
 **The cascade** outperforms either model alone:
 
@@ -162,17 +168,31 @@ The previous data ask was the generic "give us more labeled data." The new ask i
 
 ## Reproducibility
 
+All code, scripts, and report sources are public at `https://github.com/psylch/inst623-riverdale-code-enforcement`. To reproduce the experiments described above from a clean machine:
+
 ```bash
+# Clone the repository and enter the project root
+git clone https://github.com/psylch/inst623-riverdale-code-enforcement.git
+cd inst623-riverdale-code-enforcement
+
+# Install Python dependencies (uses uv for Python 3.12)
+uv sync
+
+# Place client photos under data/client-data/ before running
+# (one subdirectory per violation code, matching the folder names in the
+#  official Riverdale Park taxonomy). The client dataset itself is not
+#  redistributed in this repository for privacy reasons.
+
 # CLIP separability + top-k analysis (~2 minutes)
-uv run python FinalProject/scripts/run_clip_separability.py
+uv run python scripts/run_clip_separability.py
 
 # Gemma binary verification (~47 minutes, resumable)
-uv run python FinalProject/scripts/run_gemma_binary.py
+uv run python scripts/run_gemma_binary.py
 # Monitor progress in another terminal:
-tail -f FinalProject/checkpoints/client_gemma4_binary_stream.jsonl
+tail -f checkpoints/client_gemma4_binary_stream.jsonl
 
 # Cascade evaluation and figures
-uv run python FinalProject/scripts/analyze_binary_results.py
+uv run python scripts/analyze_binary_results.py
 ```
 
-Full experimental artifacts are in `FinalProject/checkpoints/` (predictions, similarity matrices, audit logs) and `FinalProject/reports/figures/` (visualizations). The two detailed Chinese-language reports `reports/zeroshot-client-evaluation.md` (Phase 1) and `reports/zeroshot-client-phase2.md` (Phase 2) contain the complete method and result trails that support the narrative above.
+Every path above is relative to the repository root. All experimental artifacts (predictions, similarity matrices, audit logs, and figures) land under `checkpoints/` and `reports/figures/`. The full pipeline runs end-to-end on an Apple Silicon Mac with 24 GB unified memory — model weights are downloaded from Hugging Face on first run and cached locally, and no external compute is required.
