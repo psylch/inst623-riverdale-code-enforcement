@@ -1,6 +1,8 @@
-# Data (too large for git)
-data/raw/
-data/processed/
+# Data (too large or sensitive)
+data/
+
+# Secrets
+.env
 
 # Checkpoints & model weights
 checkpoints/

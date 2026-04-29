@@ -1,174 +1,181 @@
-# Progress Report: Zero-Shot Violation Detection on Real Client Data
+# 周报：客户数据到手后的第一轮零样本评测
 
-> **Project**: AI Adoption Clinic — Municipal Code Enforcement for Riverdale Park
-> **Student**: Chihao Li (Technical Lead)
-> **Date**: 2026-04-13
-> **Scope**: Phase 1 + Phase 2 consolidated report covering model evaluation on the first batch of real inspector photos
-
----
-
-## Background
-
-Our team is building an image classification system for the Town of Riverdale Park's Development Services department. The client, Director Ryan Chelton, sees the same pattern every week: an inspector photographs a property violation in the field, then spends meaningful time back at Town Hall mapping the image to the correct municipal code section. He wants AI to take over the mapping step — accept a photo and return the matching code (e.g., § 304.7 Damaged Roof Shingles), leaving the inspector to confirm or reject.
-
-Client data has been the central constraint of the project all year. Compliance review at Town Hall has blocked release of most of the inspection archive, and when the first real batch finally arrived, it was small: **98 photos across 14 official violation codes**, of which only 9 classes actually contained images. Photos are organized by folder, one folder per code.
-
-This data volume is far below what supervised training would need. The project has therefore committed to a **zero-shot approach** — use off-the-shelf foundation models and build everything around their pretrained knowledge, without fine-tuning on client data.
+> **项目**：AI Adoption Clinic — Riverdale Park 镇违建照片自动分类
+> **学生**：Chihao Li（技术负责人）
+> **日期**：2026-04-13
 
 ---
 
-## Prior Work (Phase 1, Week of 2026-04-06)
+## 我们在做什么
 
-Phase 1 evaluated two zero-shot models on the 98-image client set: **CLIP ViT-B/32** (LAION-2B) as an embedding-based baseline, and **Gemma 4 E4B-IT** (4-bit quantized via MLX), Google's April-2026 open-weight multimodal VLM, run locally on an M4 24 GB Mac.
+这周拿到了客户的第一批真实照片。按照上周定的零样本路线，本周直接拿现成的基础模型跑了评测，没有训练任何东西。除了之前已经在 proxy 数据上验证过的 CLIP，本周新加进来的是 Google 4 月刚开源的 Gemma 4 E4B-IT 多模态 VLM，4-bit MLX 量化后能在我自己的 M4 24G Mac 上本地跑。
 
-Both models used a multi-class classification framing: for each image, produce a ranked list of the 9 candidate violation codes. Results under a multi-label ground truth (explained below):
+---
 
-| Model | Top-1 | Top-3 |
+## 这周拿到的数据长什么样
+
+98 张照片，按 14 个法规代码分文件夹存放，但只有 9 个文件夹里有图，剩下 5 个是空的。每类的数量很不均衡：
+
+| 类别 | 张数 |
+|---|---:|
+| Peeling Paint（剥落油漆） | 15 |
+| Inoperable Vehicles（废弃车辆） | 14 |
+| Long Grass / Overgrown（杂草） | 14 |
+| Junk / Trash（垃圾堆积） | 13 |
+| Broken Windows（破损窗户） | 12 |
+| Graffiti（涂鸦） | 12 |
+| Boarded Windows（钉死的窗户） | 8 |
+| Damaged Roof Shingles（屋顶瓦片破损） | 7 |
+| Deteriorating Chimney（烟囱破损） | 3 |
+
+最小的类只有 3 张图。这个体量做不了监督训练，零样本是唯一选项。
+
+整理数据时发现三件结构性的事：
+
+**一、数据本质上是多标签的，但被存成了单标签文件夹。** 我对 98 张图算 MD5，发现有 11 张是字节级相同的副本，被巡查员同时归到了多个类别下。一张烧毁建筑的照片同时出现在 Graffiti、Long Grass、Damaged Roof Shingles 三个文件夹里。文件夹结构看起来像单标签，里面其实是被压扁的多标签。
+
+**二、没有任何"无违建"对照照片。** 98 张全是违建，没有一张代表"巡查员去看过、判定合规"的状态。
+
+**三、标注语义是"巡查员引用了哪条法规"，不是"画面里有什么"。** 一张破败建筑可能同时有剥落油漆、钉死的窗户、屋顶破损，但巡查员当天可能只引用了 boarded_windows，ground truth 也就只有 boarded_windows。
+
+---
+
+## Phase 1 vs Phase 2：同一份数据，两种问法
+
+两个阶段都是这周做的。我先用一个直觉上最自然的框架（多分类）跑了一遍，看到一个怪现象之后改成了另一个框架（逐类二元）。98 张图没换，CLIP 和 Gemma 也没换，差别只在怎么向模型提问。
+
+**Phase 1：多分类。** 对每张图，让模型在 9 个类别里排序，取 top-1 / top-3 当答案。
+- CLIP ViT-B/32：把 9 个类别描述编码成文本向量，把图编码成图像向量，算余弦相似度，softmax 把分数压成加起来等于 100% 的概率，argmax 取最高的那一个。
+- Gemma 4 E4B-IT：一个 prompt 里塞 9 个候选类别，让它返回 ranked list。
+
+总体的 top-1 / top-3 命中率（多标签 ground truth 下）：
+
+| 模型 | Top-1 | Top-3 |
 |---|:---:|:---:|
 | CLIP ViT-B/32 | 80.6% | 94.9% |
-| Gemma 4 E4B-IT | **85.7%** | **96.9%** |
+| Gemma 4 E4B-IT | 85.7% | 96.9% |
 
-The numbers were respectable, but Phase 1's most important finding was not numerical. While debugging individual error cases, I discovered that **11 photos in the client data were byte-identical copies filed in multiple category folders simultaneously** (verified by MD5 hash). One photo of a burned-out building appeared under Graffiti, Long Grass, AND Damaged Roof Shingles — the inspector had tagged it with three codes. This established that the client's dataset is **fundamentally multi-label**, even though it is organized as single-label folders.
+整体看上去还行，但拆到每一类就能看出问题：
 
-A second finding came from Gemma's per-class errors. On `boarded_windows`, Gemma's recall collapsed to 25% — but its free-text rationale clearly described the correct visual features ("weathered wood, peeling paint, broken shingles"). The model was seeing everything correctly and then selecting a more specific class in its top-1 position because of over-specificity pressure inside the argmax. **The failure was at the reasoning layer, not the perception layer**.
+| 类别 | n_pos | CLIP@1 | CLIP@3 | Gemma@1 | Gemma@3 |
+|---|---:|---:|---:|---:|---:|
+| boarded_windows | 10 | 100% | 100% | **20%** | 40% |
+| broken_windows | 13 | 85% | 85% | 77% | 100% |
+| damaged_roof_shingles | 10 | 30% | 40% | 70% | 70% |
+| deteriorating_chimney | 3 | 100% | 100% | 67% | 67% |
+| graffiti | 14 | 100% | 100% | 100% | 100% |
+| inoperable_vehicle | 20 | 100% | 100% | 100% | 100% |
+| junk_trash_accumulation | 14 | 86% | 93% | 86% | 100% |
+| overgrown_vegetation | 24 | **4%** | 88% | **12%** | 88% |
+| peeling_paint | 16 | **31%** | 100% | 88% | 100% |
 
-Combining these two observations, Phase 1 concluded that the task itself was framed wrong. The inspector's actual decision is not "which class does this photo belong to?" but "for each code, can I cite this photo?" The first framing is multi-class classification; the second is **per-class binary detection**. Despite looking mathematically similar, they have completely different evaluation metrics, different prompt structures, and different failure modes.
+两个奇怪的现象：
 
----
+一是 Gemma 在 boarded_windows 上 top-1 召回只有 20%，但它的自由文本解释里清清楚楚写着"风化的木头、剥落的油漆、破损的瓦片"。视觉特征它都看到了，问题是在 softmax 上 9 个类别在抢同一个 100% 的概率预算，argmax 又只能挑一个赢家，Gemma 被迫把 boarded_windows 让位给一个更具体的类。
 
-## Phase 2 Objective
+二是 CLIP 在 overgrown_vegetation 上 top-1 只有 4%，peeling_paint 只有 31%，但 top-3 都涨到了 88% / 100%。也就是说 CLIP 其实"看到"了这些类，只是 argmax 把它们压在第 2、第 3 位上而已。
 
-Phase 1 left three hypotheses that were plausible on reasoning but unvalidated empirically:
+考虑到数据本身是多标签的，这种压制几乎是必然发生的。
 
-1. **Would per-class binary detection actually work better than multi-class classification?** Same models, same data — only the prompt format changes. Would Gemma's boarded_windows collapse recover?
-2. **Could CLIP and Gemma be combined into a cascade — CLIP as candidate generator, Gemma as per-candidate verifier — that outperforms either model alone?** Phase 1 showed the two models had complementary per-class strengths, but the cascade was only a design sketch.
-3. **Is the lingering precision problem on `peeling_paint` and `overgrown_vegetation` a model failure, or is it ground truth incompleteness?** If inspectors tag only the primary violation and ignore background violations, our "precision" metric is systematically penalizing models for seeing things the ground truth omits.
-
-Phase 2 was designed to convert all three from reasoning to measurement.
-
----
-
-## Method
-
-Phase 2 conducted three connected experiments.
-
-**Experiment 1: CLIP per-class separability.** Rather than passing the CLIP output through softmax and argmax, I preserved the raw 98×9 cosine similarity matrix. Each column became an independent "CLIP's opinion on a single class." From this matrix I computed **top-k hit-any recall** — for each image, does CLIP's top-k candidate list contain any of the image's valid labels? This is the correct metric for a cascade's Stage 1, because Stage 1's job is to route candidates to Stage 2, not to make final decisions.
-
-**Experiment 2: Gemma 4 per-class binary verification.** I wrote a new prompt that asks one question at a time: `"Does this image show <class description>?"` with an enforced single-line JSON response format containing `answer` (yes/no), `confidence` (0-100), and `rationale` (short sentence). For each of the 98 images, I ran Gemma on all 9 classes independently — **882 total calls** at roughly 3 seconds each. The inference script streams each result to a JSONL file and supports resume-from-crash: if interrupted, rerunning the script automatically skips already-completed `(image, class)` pairs. This proved essential — the overnight run encountered MPS thermal throttling after the laptop went to sleep, and I interrupted-and-resumed it once without data loss.
-
-**Experiment 3: CLIP × Gemma cascade.** For each image, take CLIP's top-k candidates, run Gemma's binary query on each one, threshold at confidence ≥ 0.5, and emit the union as the final prediction set. Evaluate with Jaccard similarity and sample-averaged F1 against the multi-label ground truth. Compare cascade F1 at k=3, 5, and 9 (k=9 reducing to a standalone Gemma binary baseline).
-
-All three experiments share the same 98-image client set and the same MD5-derived multi-label ground truth. No training, no fine-tuning, no external data.
+**Phase 2：逐类二元判断。** 同样的两个模型，同样的 98 张图，把"在 9 个里挑一个"改成"对每一对 (图, 类别) 独立问一个 yes/no"。
+- CLIP：不再做 argmax，直接保留原始的 98×9 相似度矩阵，每一列单独看作"对这一类的独立打分"。
+- Gemma：写了一个新 prompt，每次只问 "这张图是不是 X？"，强制 JSON 输出。每张图对 9 个类各跑一次，总共 882 次调用，过夜跑完。inference script 支持断点续传，因为中途 MPS 过热挂过一次。
+- 然后把两者拼成 cascade：CLIP 出 top-k 候选 → Gemma 对每个候选独立判断 → 取并集作为最终预测。
 
 ---
 
-## Results
+## 结果
 
-**CLIP as a Stage 1 candidate generator** performs well in aggregate:
+Phase 2 的二元问法下，Gemma 每一类的表现：
 
-| k | Hit-any recall | Missed images |
-|:---:|:---:|:---:|
-| 1 | 80.6% | 19 |
-| 3 | 94.9% | 5 |
-| 5 | **99.0%** | **1** |
-| 6 | 100.0% | 0 |
+| 类别 | n_pos | AUC | Recall@0.5 | Precision@0.5 |
+|---|---:|---:|---:|---:|
+| deteriorating_chimney | 3 | 1.000 | 100% | 75% |
+| graffiti | 14 | 0.993 | 100% | 67% |
+| inoperable_vehicle | 20 | 0.977 | 90% | 72% |
+| junk_trash_accumulation | 14 | 0.922 | 100% | 36% |
+| overgrown_vegetation | 24 | 0.904 | 100% | 48% |
+| damaged_roof_shingles | 10 | 0.850 | 70% | 50% |
+| peeling_paint | 16 | 0.796 | 100% | **27%** |
+| broken_windows | 13 | 0.787 | 54% | 64% |
+| boarded_windows | 10 | 0.764 | **60%** | 43% |
 
-At k=5, CLIP captures the correct answer for 97 of 98 images, making it an effective first-stage filter. However, per-class inspection revealed one systematic failure: `damaged_roof_shingles` has only 40% top-3 and top-5 recall. CLIP never ranks this class in its top 5 for 6 of 10 true positives. Other classes reach 100% recall by top-5. This is a concrete, reproducible Stage 1 bottleneck.
+跟 Phase 1 ranked 版直接对比：boarded_windows 的 Gemma 召回从 20% → 60%，模型、数据、训练都没动，只换了提问方式。其他几个原本被 argmax 压扁的类（broken_windows、damaged_roof_shingles）也基本拿回了召回。代价是部分类别冒出来很低的 precision —— peeling_paint 27%、junk_trash 36%、boarded_windows 43% —— 这部分后面要单独讲。
 
-**Gemma 4 per-class binary verification** produced a fundamentally different error profile than the Phase 1 ranked version. All 882 calls returned valid JSON (100% parse rate), and per-class results at threshold 0.5:
+CLIP 自己也用同样的多标签口径算了逐类 AUC，可以和 Gemma binary 对比谁强谁弱：
 
-| Class | AUC | Recall | Precision |
-|---|:---:|:---:|:---:|
-| deteriorating_chimney | 1.000 | 1.00 | 0.75 |
-| graffiti | 0.993 | 1.00 | 0.67 |
-| inoperable_vehicle | 0.977 | 0.90 | 0.72 |
-| junk_trash_accumulation | 0.922 | 1.00 | 0.36 |
-| overgrown_vegetation | 0.904 | 1.00 | 0.48 |
-| damaged_roof_shingles | 0.850 | 0.70 | 0.50 |
-| peeling_paint | 0.796 | 1.00 | 0.27 |
-| broken_windows | 0.787 | 0.54 | 0.64 |
-| boarded_windows | 0.764 | 0.60 | 0.43 |
+| 类别 | CLIP AUC | Gemma AUC | 谁更强 |
+|---|---:|---:|---|
+| broken_windows | **0.953** | 0.787 | CLIP (+0.17) |
+| boarded_windows | **0.931** | 0.764 | CLIP (+0.17) |
+| peeling_paint | **0.903** | 0.796 | CLIP (+0.11) |
+| overgrown_vegetation | 0.709 | **0.904** | Gemma (+0.20) |
+| damaged_roof_shingles | 0.775 | **0.850** | Gemma (+0.08) |
+| chimney / graffiti / vehicle / junk_trash | ~1.0 | ~1.0 | 打平 |
 
-Two patterns stand out. First, **recall is broadly high** — 5 of 9 classes reach 100% recall, and `boarded_windows` recovered from Phase 1's 25% to 60% simply by changing the prompt from ranked to binary. This directly confirms Phase 1's hypothesis that the failure was reasoning, not perception. Second, **precision is low on four classes** (peeling_paint 27%, junk_trash 36%, boarded 43%, overgrown 48%). Whether these are genuine errors or ground truth gaps is the central question of the interpretation below.
+两个模型的强弱几乎完全错开。Gemma 在 overgrown 和 roof 这两个 CLIP 看不清的类上明显更好，CLIP 反过来在三个窗户/油漆类上明显更好。这个互补性是 cascade 之所以能跑通的根本原因。
 
-**Per-class AUC comparison** between CLIP and Gemma reveals strong complementarity:
+cascade 的 F1：
 
-| Class | CLIP AUC | Gemma AUC | Stronger |
-|---|:---:|:---:|---|
-| overgrown_vegetation | 0.709 | **0.904** | Gemma (+19.5) |
-| damaged_roof_shingles | 0.775 | **0.850** | Gemma (+7.5) |
-| broken_windows | **0.953** | 0.787 | CLIP (+16.6) |
-| boarded_windows | **0.931** | 0.764 | CLIP (+16.7) |
-| peeling_paint | **0.903** | 0.796 | CLIP (+10.7) |
-| chimney, graffiti, vehicle, junk_trash | ~same | ~same | tied |
+| 配置 | F1 | 平均预测/张 |
+|---|:---:|:---:|
+| Gemma 单独二元（≡ k=9） | 0.633 | 2.43 |
+| Cascade k=5 | 0.668 | 2.08 |
+| Cascade k=3 | **0.703** | 1.60 |
 
-Gemma rescues CLIP on exactly the two classes CLIP struggled with in Phase 1. CLIP rescues Gemma on the three facade/window classes where Gemma's over-specificity hurts. The two models' error distributions are almost entirely disjoint, as shown in the side-by-side AUC comparison below:
+k 越小 F1 越高，这和我的直觉相反。CLIP 对 peeling_paint、overgrown_vegetation 这些类天然就给很低的相似度。k=3 时 CLIP 直接把这些类筛掉，Gemma 没机会在它们上面乱报。cascade 真正在做的事不像"CLIP 过滤、Gemma 验证"的分级管线，更像 CLIP 和 Gemma 两个独立模型互相挡错。
+
+两张图：第一张是上面那张 CLIP vs Gemma AUC 对比表的可视化，第二张是 CLIP 自己的逐类分数分布（橙色=正例，灰色=其他类作为留一负例），可以直观看出哪些类的正负分得开、哪些分不开。
 
 ![Per-class AUC: CLIP vs Gemma 4 binary](figures/auc_clip_vs_gemma_binary.png)
 
-The underlying CLIP per-class score distributions (orange = positives, gray = leave-one-out negatives from other violation classes) make the separability pattern visible:
-
 ![CLIP per-class score separability](figures/clip_separability.png)
 
-**The cascade** outperforms either model alone:
+---
 
-| Configuration | Jaccard | Sample-F1 | Predictions/image |
-|---|:---:|:---:|:---:|
-| Gemma binary alone (≡ k=9) | 0.525 | 0.633 | 2.43 |
-| Cascade k=5 | 0.568 | 0.668 | 2.08 |
-| **Cascade k=3** | **0.622** | **0.703** | 1.60 |
+## 现在最大的问题：我们没有真正的负例
 
-**A counter-intuitive finding**: smaller k produces higher F1. k=3's F1 of 0.703 beats k=5 (0.668) and k=9 (0.633). The expected pattern should have been "more candidates = more recall = more F1", but the data shows the opposite.
+这是这周做完之后最重要的一件事，也是上面所有数字都要打个折看的原因。
 
-The explanation is that CLIP's "silence" — assigning low similarity to a class — functions as a veto on Gemma's high-FPR classes (`peeling_paint` and `overgrown_vegetation`, where Gemma says "yes" to roughly half of the non-target images). At k=3, CLIP filters out most questions on which Gemma would have produced false positives, so Gemma never gets the chance to misfire. At k=9, every question reaches Gemma, and the high-FPR classes pollute the output. The cascade is effectively a **joint verification system**: a flag requires agreement from two independent evidence sources, and their errors rarely coincide.
+98 张照片全是违建，没有一张是"巡查员去看过、判定合规"的对照。但要算 precision、recall、AUC，必须有正例和负例。我只能用一个 workaround：对类别 X 来说，"负例"就是没有被标 X 的那些照片。
+
+但这些"负例"本身仍然是别的违建的正例。算 peeling_paint 的 precision 时，"负例"是被归到 graffiti、boarded_windows、broken_windows…… 的那些照片。Riverdale 的巡查照片几乎全是破败建筑，这些"负例"里大概率本来就有真实的剥落油漆，只是巡查员当天没引用 § 304.2。
+
+这就解释了为什么 peeling_paint 在 cascade k=3 下召回 100%、精度只有 40%。Gemma 大概率不是在乱报，它是在识别画面里真实存在但 ground truth 没标注的违建，而我们的指标把它算成假阳性。
+
+也就是说，当前的 precision 衡量的是"模型和巡查员归档习惯的一致性"，而不是"模型视觉判断的准确性"。在拿到真负例之前，所有数字都要带这个星号读。这件事不是模型问题，也不是 prompt 问题，只能靠从客户那里拿到更多/更完整的数据来解决。
 
 ---
 
-## Conclusions
+## 下一步
 
-**The framing reframe is validated.** Gemma's `boarded_windows` recall moved from 25% (Phase 1 ranked) to 60% (Phase 2 binary) with no model changes, no training, and no data changes — only the prompt format. Three other classes that were compressed by argmax in Phase 1 reached 100% recall in binary mode. The same observation holds for CLIP: per-class AUC on multiple classes is higher than the classes' top-1 recall, meaning CLIP carries more information than the classification pipeline exposes. Task framing was the bottleneck, not model capacity.
+**不依赖客户的事，下周自己做：**
 
-**The cascade is a joint verification mechanism, not an efficiency optimization.** My initial mental model of the cascade was "CLIP as cheap filter, Gemma as expensive verifier, smaller k saves compute." The data contradicted this: smaller k raises precision because it uses CLIP's silence as a veto power over Gemma's failure modes. The correct framing is "two independent foundation models must both agree before a flag is raised." This reframing has implications for how we present the system to Ryan: not a hierarchical filter, but a multi-source consensus mechanism — a narrative closer to responsible-AI best practices than to standard engineering optimization.
+1. 改 CLIP 在 damaged_roof_shingles 上的 prompt。这一类是 cascade Stage 1 唯一的瓶颈，CLIP 在 6/10 的真正例上根本没把它排进 top-5。换更具体的视觉描述试试。
+2. 收紧 peeling_paint 的 Gemma prompt，加 "substantial / noticeable area" 这种限定词，看 FPR 会不会掉。如果掉不动，反过来更说明问题在 ground truth 不在模型。
+3. 把 cascade 封装成一个能跑 demo 的模块，下次和 Ryan 同步时可以现场演示。
 
-**The remaining precision gap is likely ground truth incompleteness.** `peeling_paint` in cascade k=3 has 100% recall but only 40% precision, meaning most of Gemma's "yes" votes are against photos that the client did not label as peeling paint. However, Riverdale's inspector photos are overwhelmingly of deteriorating buildings, where peeling paint is a near-universal background condition. The client's filing convention is "which code did the inspector cite?", not "which codes are visually present?" Gemma is most likely identifying real but un-flagged background violations, which our ground truth reports as false positives. Resolving this requires either re-annotation of the existing 98 photos with full multi-label truth, or a set of truly negative (non-violation) reference photos — both of which are client-dependent data asks.
+**要从客户那里拿的两样东西**（下次和 Ryan 同步时正式提）：
 
----
+1. 大约 200 张"无违建"照片 —— 巡查员去看过、判定合规的房子。这是唯一能算出运营意义上 false positive rate 的数据。
+2. 对现有 98 张做完整的多标签重标 —— 让巡查员把画面里所有可见违建都标出来，不只是当天引用的那一条。这能直接解决 peeling_paint 的精度悖论。
 
-## Implications
+之前向客户提的数据请求是泛泛的"给我们更多标注数据"。这次的请求是具体的：要负例做 FPR、要补全标签做 precision。这种具体的请求更容易过 Town Hall 的合规审查。
 
-**Task framing has higher ROI than hyperparameter tuning in this regime.** Over Phase 1 and Phase 2 combined, every performance improvement came from changing how we asked the model — never from training, fine-tuning, a larger model, or hyperparameter changes. This is an important direction for the AI Adoption Clinic curriculum: when a foundation model underperforms, the first instinct should be to question the task definition, not to search for better weights.
+**如果客户那边走不通的兜底方案**：
 
-**"Two independent questions" beats "one compound question" for foundation models.** The ranked prompt forced Gemma into internal competition among 9 classes, implicitly producing a ranking, which the model did poorly because of over-specificity pressure. Splitting into 9 independent yes/no questions removed the implicit ranking step and let the model judge each class on its own. This is a general pattern — whenever a task can be decomposed into independent sub-questions, decomposition should be preferred over letting the model do internal comparison.
+Town Hall 的合规审查一直是数据这块的瓶颈，Ryan 那边能不能拿到这两批数据我没有把握。如果走不通，有两个备份方向：
 
-**Error complementarity is the right basis for ensemble design.** CLIP and Gemma make almost entirely non-overlapping errors on this dataset. This was not by architectural design (one is contrastive, the other generative — these categories predict nothing about error correlation); it was an empirical discovery. Future ensemble design decisions should be driven by measured error correlation rather than by architectural intuition about "which models should complement each other."
+1. **自己构造负例池。** 用我们之前已经收集的 proxy 数据集（街景、Google Open Images 里的住宅外观），人工挑出明显合规的房屋照片，凑出一批"非违建"对照。这种负例不会有 Riverdale 巡查照片的真实分布，但至少能把 false positive rate 算出一个数量级，比当前完全没有要好。
+2. **对现有 98 张做多标签重标。** 巡查员的标注是"引用了哪条法规"，这个改不了，但画面里实际有什么违建是可以看着照片重新标的。让 9 个类别在标注层面互为正负 —— 一张被巡查员归到 boarded_windows 的照片，如果画面里同时有剥落油漆，就同时打上 peeling_paint 标签。重标后的 ground truth 拿来重算 precision，能直接验证"peeling_paint 27% 是模型乱报还是 ground truth 漏标"这件事。
 
----
-
-## Next Steps
-
-**Immediate work (no client dependency):**
-
-1. Rewrite the CLIP prompt for `damaged_roof_shingles`. The current three prompts are descriptive; replacing them with more visually specific phrasing may lift the class into top-5 and eliminate the one Stage 1 choke point.
-2. Tighten the `peeling_paint` binary prompt with qualifiers like "substantial" or "noticeable area" to test whether FPR drops without hurting recall. If the drop is flat, it strongly supports the ground-truth-incompleteness interpretation.
-3. Consolidate the cascade into a single `CascadePipeline` module that the notebook and a CLI demo can call, to support live demonstration at the next client meeting.
-
-**Client data asks (to be raised at the next Ryan Chelton sync):**
-
-1. Approximately 200 "no violation" photos — buildings an inspector visited and judged compliant. These are the only way to compute operationally meaningful precision and false positive rate.
-2. Full multi-label re-annotation of the existing 98 photos, with inspectors marking every visible violation rather than only the primary cited one. This would empirically resolve the `peeling_paint` precision paradox.
-
-The previous data ask was the generic "give us more labeled data." The new ask is specific: negatives for FPR measurement, and completion of existing labels for precision measurement. This framing is more likely to pass the compliance review that has been blocking the original full archive.
-
-**Not recommended:**
-
-- Training DINOv2 or other supervised models. With a cascade F1 of 0.703 achieved at zero training cost, the ROI on training is low until meaningfully more client data is available.
-- Expanding the taxonomy. The 9-class pipeline is already sufficient to demonstrate extensibility (adding a new code = writing one prompt), and which specific codes to add should be driven by Ryan's business priorities rather than technical path-of-least-resistance.
+这两个方向都不依赖外部数据，技术上都能走通。具体怎么推进、谁来做，等下次和 Ryan 同步、以及和团队对齐之后再定。
 
 ---
 
 ## Reproducibility
 
-All code, scripts, and report sources are public at `https://github.com/psylch/inst623-riverdale-code-enforcement`. To reproduce the experiments described above from a clean machine:
+所有代码、脚本和报告源文件都在 `https://github.com/psylch/inst623-riverdale-code-enforcement`。从干净环境复现：
 
 ```bash
 # Clone the repository and enter the project root
@@ -195,4 +202,4 @@ tail -f checkpoints/client_gemma4_binary_stream.jsonl
 uv run python scripts/analyze_binary_results.py
 ```
 
-Every path above is relative to the repository root. All experimental artifacts (predictions, similarity matrices, audit logs, and figures) land under `checkpoints/` and `reports/figures/`. The full pipeline runs end-to-end on an Apple Silicon Mac with 24 GB unified memory — model weights are downloaded from Hugging Face on first run and cached locally, and no external compute is required.
+所有路径相对于仓库根目录。所有实验产物（预测结果、相似度矩阵、审计日志、图表）都落在 `checkpoints/` 和 `reports/figures/` 下。整条流水线在 24 GB 统一内存的 Apple Silicon Mac 上可以端到端跑通，模型权重首次运行时从 Hugging Face 下载并本地缓存，不需要任何外部算力。
