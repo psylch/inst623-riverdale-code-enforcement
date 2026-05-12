@@ -117,12 +117,15 @@ def per_class_binary_stats(scores: np.ndarray, Y_multi: np.ndarray, done: np.nda
         tp = int(((Y_multi[:, j] == 1) & y_pred & ok).sum())
         fp = int(((Y_multi[:, j] == 0) & y_pred & ok).sum())
         fn = int(((Y_multi[:, j] == 1) & ~y_pred & ok).sum())
+        tn = int(((Y_multi[:, j] == 0) & ~y_pred & ok).sum())
         recall = tp / (tp + fn) if (tp + fn) > 0 else float("nan")
         precision = tp / (tp + fp) if (tp + fp) > 0 else float("nan")
+        fpr = fp / (fp + tn) if (fp + tn) > 0 else float("nan")
         stats.append({
             "class": cls, "n_pos": n_pos, "n_neg": n_neg,
             "auc": auc, "recall_at_0.5": recall, "precision_at_0.5": precision,
-            "tp": tp, "fp": fp, "fn": fn,
+            "fpr_at_0.5": fpr,
+            "tp": tp, "fp": fp, "fn": fn, "tn": tn,
         })
     return stats
 
@@ -221,12 +224,13 @@ def main() -> None:
     stats_binary = per_class_binary_stats(scores, Y_multi, done)
     print()
     print("=== Gemma 4 binary per-class ===")
-    print(f"{'class':<25}  {'n_pos':>5}  {'n_neg':>5}  {'auc':>5}  {'recall':>7}  {'precision':>9}")
+    print(f"{'class':<25}  {'n_pos':>5}  {'n_neg':>5}  {'auc':>5}  {'recall':>7}  {'precision':>9}  {'fpr':>6}")
     for s in stats_binary:
         r = f"{s['recall_at_0.5']:.2f}" if np.isfinite(s['recall_at_0.5']) else "  nan"
         p = f"{s['precision_at_0.5']:.2f}" if np.isfinite(s['precision_at_0.5']) else "  nan"
         a = f"{s['auc']:.3f}" if np.isfinite(s['auc']) else " nan "
-        print(f"  {s['class']:<23}  {s['n_pos']:>5}  {s['n_neg']:>5}  {a:>5}  {r:>7}  {p:>9}")
+        f = f"{s['fpr_at_0.5']:.3f}" if np.isfinite(s['fpr_at_0.5']) else "  nan"
+        print(f"  {s['class']:<23}  {s['n_pos']:>5}  {s['n_neg']:>5}  {a:>5}  {r:>7}  {p:>9}  {f:>6}")
 
     summary_path = REPO / "checkpoints" / "gemma4_binary_summary.json"
     summary_path.write_text(json.dumps(stats_binary, indent=2))

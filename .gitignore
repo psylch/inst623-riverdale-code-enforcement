@@ -20,3 +20,6 @@ __pycache__/
 
 # Roboflow
 roboflow/
+
+# Browser automation debug artifacts
+.playwright-mcp/
