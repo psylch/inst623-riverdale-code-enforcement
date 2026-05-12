@@ -60,9 +60,7 @@ Inspector photos are not redistributed in this repo for privacy reasons. Place t
 ├── scripts/     Pipeline entry points: run_clip_compliant, run_gemma_binary_compliant,
 │                analyze_binary_results, compute_iaa
 ├── notebooks/   Experiment notebooks
-├── handoff/     Client-facing docs: CLIENT_REPORT.md + USAGE.md
-└── archive/     Historical working docs from the exploration phase (phase reports,
-                 data audits, planning notes). Not required to use the code.
+└── handoff/     Client-facing docs: CLIENT_REPORT.md + USAGE.md
 ```
 
 ## Acknowledgments
