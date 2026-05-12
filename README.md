@@ -26,61 +26,43 @@ On a first batch of 98 real inspector photos covering 9 Riverdale Park
 violation codes (multi-label ground truth), the cascade reaches
 **sample-F1 0.703 / top-3 recall 96.9% with zero training data**.
 
-## Reports
+## Handoff documents
 
-- `reports/progress-report-2026-04-13.md` — consolidated English progress
-  report written for the course instructor (Phase 1 + Phase 2 narrative)
-- `reports/zeroshot-client-evaluation.md` — detailed Phase 1 report
-  (Chinese): multi-class zero-shot baseline, debugging, and the pivot to
-  per-class binary detection
-- `reports/zeroshot-client-phase2.md` — detailed Phase 2 report (Chinese):
-  CLIP separability, Gemma binary verification, CLIP × Gemma cascade
+The two files in [`handoff/`](handoff/) are the canonical references:
 
-Each report is self-contained. Use `pandoc report.md -o report.pdf
---pdf-engine=typst` to convert to PDF (add `-V mainfont="Sarasa UI SC"` for
-the Chinese ones).
+- [`handoff/CLIENT_REPORT.md`](handoff/CLIENT_REPORT.md) — results, methodology, per-tier deployment recommendations, and the SOP for adding new violation categories.
+- [`handoff/USAGE.md`](handoff/USAGE.md) — code usage guide: install, reproduce the headline numbers, compute inter-annotator agreement, and add a new violation category.
+
+Start with `USAGE.md` if you want to run the pipeline; start with `CLIENT_REPORT.md` if you want to understand the results.
 
 ## Quick start
+
+See [`handoff/USAGE.md`](handoff/USAGE.md) for the full guide. TL;DR:
 
 ```bash
 git clone https://github.com/psylch/inst623-riverdale-code-enforcement.git
 cd inst623-riverdale-code-enforcement
-
-# Install Python deps (uv, Python 3.12)
 uv sync
 
-# Place client photos under data/client-data/<violation-code>/
-# (The client dataset is not redistributed here for privacy reasons.)
-
-# Stage 1: CLIP per-class separability + top-k recall (~2 min)
-uv run python scripts/run_clip_separability.py
-
-# Stage 2: Gemma 4 binary verification (98 × 9 = 882 calls, ~47 min, resumable)
-uv run python scripts/run_gemma_binary.py
-
-# Cascade evaluation + figures
+# Reproduce the headline numbers (98 images × 9 categories, ~60–90 min)
+uv run python scripts/run_clip_compliant.py
+uv run python scripts/run_gemma_binary_compliant.py
 uv run python scripts/analyze_binary_results.py
 ```
 
-All experimental artifacts (prediction matrices, similarity matrices, audit
-logs, figures) land under `checkpoints/` and `reports/figures/`. Model weights
-(CLIP ViT-B/32 ≈ 600 MB, Gemma 4 E4B-IT 4-bit ≈ 4 GB) are downloaded from
-Hugging Face on first run and cached locally.
+Inspector photos are not redistributed in this repo for privacy reasons. Place them under `data/client-data/<§ code> - <name>/` to run the pipeline on your own data.
 
 ## Repository layout
 
 ```
 .
-├── src/                    Python modules (client_data, zeroshot, binary_prompt,
-│                           evaluate, cache, data, models, train, clip_baseline)
-├── scripts/                Standalone runners with JSONL streaming + resume
-├── notebooks/              Experiment notebooks (CLIP + Gemma on client data)
-├── reports/                Source markdown reports + figures
-│   └── figures/            CLIP separability, AUC comparison plots
-├── results/                Earlier progress reports
-├── technical-plan.md       Execution plan
-├── dataset-status.md       Proxy dataset audit
-└── data-cleaning-report.md Data cleaning audit from the proxy phase
+├── src/         Python modules (client_data, zeroshot, binary_prompt, evaluate, ...)
+├── scripts/     Pipeline entry points: run_clip_compliant, run_gemma_binary_compliant,
+│                analyze_binary_results, compute_iaa
+├── notebooks/   Experiment notebooks
+├── handoff/     Client-facing docs: CLIENT_REPORT.md + USAGE.md
+└── archive/     Historical working docs from the exploration phase (phase reports,
+                 data audits, planning notes). Not required to use the code.
 ```
 
 ## Acknowledgments
