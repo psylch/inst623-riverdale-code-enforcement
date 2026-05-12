@@ -1,11 +1,33 @@
-# Data (too large or sensitive)
-data/
+# Data — photos and proxy datasets are gitignored;
+# methodology metadata (manifest + 3-rater + consensus) is tracked.
+data/raw/
+data/synthetic/
+data/human_labels_v2/
+data/proxy-datasets-raw.zip
+data/cleaning_results.json
+
+# Inside data/client-data/: ignore every photo subdirectory but keep
+# the manifest and the labeling/ tree.
+data/client-data/*/
+!data/client-data/labeling/
+
+# Inside labeling/: ignore everything except the human/ subtree.
+data/client-data/labeling/*
+!data/client-data/labeling/human/
+
+# Inside human/: ignore raw .xlsx + per-rater CSVs, keep merged + consensus.
+data/client-data/labeling/human/*
+!data/client-data/labeling/human/merged_3labelers.csv
+!data/client-data/labeling/human/consensus_binary.csv
 
 # Secrets
 .env
 
 # Checkpoints & model weights
 checkpoints/
+
+# Auto-generated figures and intermediate reports (regenerable from scripts)
+reports/
 
 # Python
 __pycache__/

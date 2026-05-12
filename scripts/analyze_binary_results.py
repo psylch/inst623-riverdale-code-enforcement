@@ -68,7 +68,43 @@ def load_binary_from_stream(stream_path: Path, N: int, K: int):
     return scores, answers, parse_ok, done
 
 
-def build_multilabel_truth(df) -> np.ndarray:
+def build_multilabel_truth(df, truth_source: str = "consensus") -> np.ndarray:
+    """Build the (N, K) multi-label ground-truth matrix for the 98 client images.
+
+    truth_source:
+      - "consensus" (default): read 3-rater majority labels from
+        data/client-data/labeling/human/consensus_binary.csv (image_id → 9 cols).
+        Falls back to "folder" if the CSV is missing.
+      - "folder": derive labels from the violation folder each image lives in
+        (one image can be placed in multiple folders → multi-label).
+    """
+    K = len(CLIENT_CLASSES)
+    Y = np.zeros((len(df), K), dtype=np.int8)
+
+    if truth_source == "consensus":
+        consensus_path = REPO / "data" / "client-data" / "labeling" / "human" / "consensus_binary.csv"
+        manifest_path = REPO / "data" / "client-data" / "manifest.csv"
+        if consensus_path.exists() and manifest_path.exists():
+            import pandas as pd
+            manifest = pd.read_csv(manifest_path)
+            filename2id = dict(zip(manifest["filename"], manifest["image_id"]))
+            consensus = pd.read_csv(consensus_path).set_index("image_id")
+            print(f"[truth] using 3-rater consensus from {consensus_path.name}")
+            for i, p in enumerate(df["path"].tolist()):
+                filename = Path(p).name
+                if filename not in filename2id:
+                    continue
+                image_id = filename2id[filename]
+                if image_id in consensus.index:
+                    row = consensus.loc[image_id]
+                    for j, cls in enumerate(CLIENT_CLASSES):
+                        Y[i, j] = int(row[cls])
+            return Y
+        else:
+            print(f"[truth] consensus_binary.csv or manifest.csv missing — falling back to folder labels")
+
+    # folder-name fallback
+    print("[truth] using folder-name labels")
     root = REPO / "data" / "client-data"
     hash2labels: dict[str, set[str]] = defaultdict(set)
     for f in root.rglob("*"):
@@ -86,8 +122,6 @@ def build_multilabel_truth(df) -> np.ndarray:
         if f.is_file() and f.suffix.lower() in (".jpg", ".jpeg", ".png")
     }
 
-    K = len(CLIENT_CLASSES)
-    Y = np.zeros((len(df), K), dtype=np.int8)
     for i, p in enumerate(df["path"].tolist()):
         h = path2hash[str(Path(p).resolve())]
         for lab in hash2labels[h]:
@@ -235,6 +269,39 @@ def main() -> None:
     summary_path = REPO / "checkpoints" / "gemma4_binary_summary.json"
     summary_path.write_text(json.dumps(stats_binary, indent=2))
     print(f"[analyze] saved {summary_path}")
+
+    # === clean-house FPR (synthetic compliant baseline) ===
+    compliant_stream = REPO / "checkpoints" / "compliant_gemma4_binary_stream.jsonl"
+    if compliant_stream.exists():
+        N_clean = 20  # synthetic clean baseline size
+        clean_scores, clean_answers, clean_ok, clean_done = load_binary_from_stream(
+            compliant_stream, N_clean, K
+        )
+        total_cells = int(clean_done.sum())
+        total_yes = int((clean_answers == 1).sum())
+        print()
+        print(f"=== clean-house false alarms (compliant baseline, {N_clean} images × {K} categories) ===")
+        print(f"  total Gemma 'yes' on clean houses: {total_yes} / {total_cells}  (FPR = {total_yes / total_cells:.4f})")
+        print(f"  {'class':<25}  {'n_yes':>5}  {'n_total':>7}")
+        clean_per_class = []
+        for j, cls in enumerate(CLIENT_CLASSES):
+            n_yes = int((clean_answers[:, j] == 1).sum())
+            n_total = int(clean_done[:, j].sum())
+            print(f"  {cls:<25}  {n_yes:>5}  {n_total:>7}")
+            clean_per_class.append({"class": cls, "n_yes": n_yes, "n_total": n_total})
+        clean_summary = {
+            "total_yes": total_yes,
+            "total_cells": total_cells,
+            "fpr": total_yes / total_cells if total_cells > 0 else float("nan"),
+            "per_class": clean_per_class,
+        }
+        (REPO / "checkpoints" / "compliant_summary.json").write_text(
+            json.dumps(clean_summary, indent=2)
+        )
+    else:
+        print()
+        print(f"[analyze] {compliant_stream.name} not found — skipping clean-house FPR. "
+              f"Run scripts/run_gemma_binary_compliant.py to enable.")
 
     # only do the full eval if the run is complete
     if int(done.sum()) == N * K:
