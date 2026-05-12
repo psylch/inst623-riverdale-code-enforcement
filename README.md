@@ -32,6 +32,7 @@ The two files in [`handoff/`](handoff/) are the canonical references:
 
 - [`handoff/CLIENT_REPORT.md`](handoff/CLIENT_REPORT.md) — results, methodology, per-tier deployment recommendations, and the SOP for adding new violation categories.
 - [`handoff/USAGE.md`](handoff/USAGE.md) — code usage guide: install, reproduce the headline numbers, compute inter-annotator agreement, and add a new violation category.
+- [`handoff/SYNTHETIC_NEGATIVES.md`](handoff/SYNTHETIC_NEGATIVES.md) — how the 20 synthetic clean-house images (the 0 % false-alarm baseline) were generated and verified.
 
 Start with `USAGE.md` if you want to run the pipeline; start with `CLIENT_REPORT.md` if you want to understand the results.
 
@@ -59,8 +60,7 @@ Inspector photos are not redistributed in this repo for privacy reasons. Place t
 ├── src/         Python modules (client_data, zeroshot, binary_prompt, evaluate, ...)
 ├── scripts/     Pipeline entry points: run_clip_compliant, run_gemma_binary_compliant,
 │                analyze_binary_results, compute_iaa
-├── notebooks/   Experiment notebooks
-└── handoff/     Client-facing docs: CLIENT_REPORT.md + USAGE.md
+└── handoff/     Client-facing docs: CLIENT_REPORT.md + USAGE.md + SYNTHETIC_NEGATIVES.md
 ```
 
 ## Acknowledgments

@@ -136,7 +136,7 @@ handoff/                # CLIENT_REPORT, USAGE (this file), slide PDF
 ## 8. Known limitations & next steps
 
 See CLIENT_REPORT §10 for the full list. Short version:
-- The 0 % false-alarm rate is validated on 20 *synthetic* clean houses. Validating against 50–100 real city clean-house photos is the highest-value next step on the client side.
+- The 0 % false-alarm rate is validated on 20 *synthetic* clean houses (see [`SYNTHETIC_NEGATIVES.md`](SYNTHETIC_NEGATIVES.md) for how they were built and verified). Validating against 50–100 real city clean-house photos is the highest-value next step on the client side.
 - The pipeline scores one photo at a time. Multi-angle aggregation per address is not implemented.
 - No web UI — current entry points are CLI scripts. A REST API + upload form is a reasonable next engineering increment (CLIENT_REPORT §10.2 item 5).
 
